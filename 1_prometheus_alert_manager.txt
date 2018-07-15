@@ -1,0 +1,189 @@
+- Setting up the AlertManager with Prometheus :
+
+# mkdir /docker/prometheus
+# mkdir /docker/alertmanager
+
+# cd /docker/
+# touch prometheus/prometheus.yml
+# touch prometheus/prometheus.rules
+
+
+# vim prometheus/prometheus.yml
+
+---------------------------------------------------
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'codelab-monitor'
+
+rule_files:
+  - 'prometheus.rules'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+
+#################
+# Node Exporter #
+#################
+
+  - job_name:       'llbpal55'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['llbpal53.pal.sap.corp:9100']	#default is 9100,this could be also any other node, which you want to monitor.
+        labels:
+          group: 'node_exporter'
+
+#####################
+# Cadvisor Exporter #
+#####################
+
+  - job_name:   'hostname'
+    scrape_interval: 10s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['192.168.24.55:9911']
+        labels:
+          group: 'cAdvisor'
+
+#####################
+# Blackbox Exporter #
+#####################
+
+#  - job_name:       'hostname'
+#    scrape_interval: 60s
+#    scheme: 'http'
+#    metrics_path: '/probe'
+#    params:
+#      module: ['http_post']
+#      target: ['http://xxx.xxx.xxx.xxx:8080/API']
+#    static_configs:
+#      - targets: ['blackbox-exporter:9115']
+#        labels:
+#          group: 'blackbox_exporter'
+
+####################
+# HAProxy Exporter #
+####################
+
+#  - job_name:   'hostname'
+#    scrape_interval: 5s
+#    static_configs:
+#      - targets: ['xxx.xxx.xxx.xxx:9101']
+#        labels:
+#          group: 'haproxy-exporter'
+---------------------------------------------------
+
+
+
+
+# vim prometheus/prometheus.rules
+---------------------------------------------------
+###########################
+# Alert - Monitoring Host #
+###########################
+ALERT node_down
+ IF up{} == 0
+ FOR 30s
+ LABELS { severity = "critical" }
+ ANNOTATIONS {
+      summary = "Node exporter is down",
+      description = "{{ $labels.job }} is down.",
+      runbook = "https://prometheus.io/docs/alerting/configuration/",
+  }
+---------------------------------------------------
+
+
+# docker pull grafana/grafana
+# docker pull prom/alertmanager
+# docker pull prom/prometheus
+
+
+# docker run -it -d -p 3000:3000 --name grafana grafana/grafana
+	- check localhost:3000
+	
+
+# cd /docker/
+# touch alertmanager/config.yml
+# vim alertmanager/config.yml	
+		- Before this open a slack channel and add a required token to the below configuration file.
+
+-------------------------------------------------
+c5246840@llbpal55:~/prometheus/dmzrio/prometheus-grafana-alertmanager/alertmanagerdata>  cat config.yml
+##################
+# Notif to email #
+##################
+
+route:
+  group_by: ['notif']
+  repeat_interval: 3h
+  receiver: 'devops'
+
+receivers:
+- name: 'devops'
+  email_configs:
+  - to: 'sachin.kesarkar@sap.com'
+
+##################
+# Notif to slack #
+##################
+receivers:
+  - name: 'devops'
+    slack_configs:
+    - channel: alerts
+      send_resolved: true
+      api_url: https://hooks.slack.com/services/<token-webhook-api-slack>
+      title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] Monitoring Notification'
+      text: >-
+        {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }} - `{{ .Labels.severity }}`
+          *Description:* {{ .Annotations.description }}
+          *Graph:* <{{ .GeneratorURL }}|:chart_with_upwards_trend:> *Runbook:* <{{ .Annotations.runbook }}|:spiral_note_pad:>
+          *Details:*
+          {{ range .Labels.SortedPairs }} • *{{ .Name }}:* `{{ .Value }}`
+          {{ end }}
+        {{ end }}
+-------------------------------------------------
+
+# docker run -it -d --name alertmanager -p 9093:9093 -v /docker/alertmanager:/etc/alertmanager prom/alertmanager
+
+# cd /docker/prometheus
+# docker run -it -d --name prometheus -p 9090:9090 -v /docker/prometheus:/etc/prometheus --link alertmanager prom/prometheus --config.file=/etc/prometheus/prometheus.yml -alertmanager.url=http://alertmanager:9093
+
+
+- check prometheus by http://localhost:9090
+	- Status >> Targets >> endpoint http://localhost:9100/metrics would be up.
+	
+- http://localhost:9093		-- alert manager is up and running.
+
+
+- login to grafana: http://localhost:3000 with admin/admin
+	- add data source
+		- Name : prometheus, Type: prometheus, url; http://localhost:9090
+			- Click "Add"
+			
+		- Dashboard >> import
+		- Dashboard >> Home >> at top left drop down menu, select "prometheus stats"
+		
+		- New dashboard >> drag-drop Singlestat
+			- put in hostname
+			- Metrics : prometheus
+			- in text box paste : up{group="centos7",instance="localhost:9100",job="node1"}
+			- options : 
+				- stat : current
+				- Unit : none
+				- Thresholds : 0,1
+				- tick Backgroud
+			- Value Mappings :
+				- Set value mappings: 1 -> UP
+				- + add value mappings : 0 -> DOWN
+			- Save dashboard in the top, name it as "Host status"
+			
+			
+- login to other node : and shut it down and kill the "node_exporter" process. You will notice that the host is shown in the RED.
+	# systemctl stop node-exporter
+	- The host will be shown in the RED.
+	- Also you will get alerts on the configured Slack channel.

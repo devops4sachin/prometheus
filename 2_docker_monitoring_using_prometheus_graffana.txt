@@ -1,0 +1,144 @@
+- Monitoring Docker Container using cAdvisor on Prometheus and Grafana :
+
+https://www.youtube.com/watch?v=nzf2pSnsuZs
+
+# git clone https://github.com/dimzrio/docker-compose.git
+# ls
+# cd docker-compose/
+# ls
+# cp -r cadvisor ../
+# cp -r prometheus-grafana-alertmanager ../
+# cd ..
+# ls
+# rm -rf docker-compose/
+
+
+cd prometheus-grafana-alertmanager/
+ls
+cat docker-compose.yml
+-------------------------------------------------------------------------
+version: "3"
+
+services:
+  alertmanager:
+      container_name: alertmanager
+      image: prom/alertmanager:v0.8.0
+      restart: always
+      ports:
+          - "9093:9093"
+      volumes:
+          - ./alertmanagerdata:/etc/alertmanager:rw
+
+  grafana:
+      container_name: grafana
+      restart: always
+      image: grafana/grafana:4.4.3
+      ports:
+          - "3000:3000"
+      environment:
+          - GF_INSTALL_PLUGINS=grafana-piechart-panel,jdbranham-diagram-panel
+
+  prometheus:
+      container_name: prometheus
+      image: prom/prometheus:v1.7.1
+      links:
+       - alertmanager
+      command:
+       - '-config.file=/etc/prometheus/prometheus.yml'
+       - '-web.external-url=http://prometheus:9090/'
+       - '-web.route-prefix=/'
+       - '-alertmanager.url=http://alertmanager:9093'
+      restart: always
+      ports:
+          - "9090:9090"
+      volumes:
+          - ./prometheusdata:/etc/prometheus:rw
+          - ./prometheusdb:/prometheus/data:rw
+-------------------------------------------------------------------------
+
+
+
+
+vim prometheusdata/prometheus.yml
+-------------------------------------------------------------------------
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'codelab-monitor'
+
+rule_files:
+  - 'prometheus.rules'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+
+#####################
+# cAdvisor Exporter	#
+#####################
+ 
+  - job_name:   'hostname'
+    scrape_interval: 10s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['192.168.24.55:9911']		<<<< put in a localhost ip.
+        labels:
+          group: 'cAdvisor'	  
+-------------------------------------------------------------------------
+
+# ls
+# docker-compose up -d
+# docker ps
+
+- go to "localhost:9090/targets", you will see that end point "http://localhost:9911/metrics" is down.
+
+- go to grafana "localhost:3000/login" with credentials "admin/admin"
+	- add data source, name/type as a prometheus
+	- url as "localhost:9090", direct access
+	- import.
+	- at the top click on prometheus dashboard
+
+
+cd cadvisor/
+ls
+vim docker-compose.yml
+-------------------------------------------------------------------------
+
+version: '2'
+
+services:
+    cadvisor:
+        image: google/cadvisor
+        container_name: cadvisor
+        volumes:
+           - /:/rootfs:ro
+           - /var/run:/var/run:rw
+           - /sys:/sys:ro
+           - /var/lib/docker/:/var/lib/docker:ro
+        ports:
+           - 9911:8080
+        privileged: true
+        restart: always
+-------------------------------------------------------------------------
+# ls
+# docker-compose up -d
+
+>>>> Here the cAdvisor will come up.
+	# http://localhost:9911/metrics
+	# http://localhost:9911/docker/
+	
+	
+- go to "https://grafana.com/dashboards/193",
+	- then download the JSON definition of the dashboard
+	- go to grafana dashboard and import this JSON file
+	
+cd prometheus-grafana-alertmanager/
+ls
+cat docker-compose.yml
+cat prometheusdata/prometheus.yml
+
+
+https://www.youtube.com/watch?v=GsozyDTDJvk&feature=youtu.be
